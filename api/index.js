@@ -74,44 +74,31 @@ app.all('/api/calls', async (req, res) => {
 
     const calls = await fetchCTMCalls(start, end);
 
-    // ── GLOBAL UNIQUE: deduplicate by caller phone number ──
-    const callerPhones = new Set();
-    const connectedCallerPhones = new Set();
-    let totalDurationSec = 0;
+    // ── COUNT BY "first time caller" TAG ──
+    const isFirstTimeCaller = (call) => {
+      const tags = call.tags || call.tag_list || call.labels || '';
+      const tagStr = Array.isArray(tags) ? tags.join('|') : String(tags);
+      return tagStr.toLowerCase().includes('first time caller');
+    };
 
-    for (const call of calls) {
-      // Caller phone — try various CTM field names
-      const callerRaw = (
-        call.caller_number ||
-        call.caller_phone ||
-        call.caller_id    ||
-        call.from_number  ||
-        call.ani          ||
-        ''
-      ).replace(/\D/g, '');
+    const isConnectedCall = (call) =>
+      call.answered === true   ||
+      call.answered === 'true' ||
+      call.connected === true  ||
+      call.status === 'answered';
 
-      const isConnected = call.answered === true ||
-                          call.answered === 'true' ||
-                          call.connected === true  ||
-                          call.status === 'answered';
-
-      // Track unique callers (total)
-      if (callerRaw) callerPhones.add(callerRaw);
-
-      // Track unique connected callers
-      if (isConnected && callerRaw) connectedCallerPhones.add(callerRaw);
-
-      // Duration
-      const dur = parseInt(call.duration_in_seconds || call.duration || 0);
-      totalDurationSec += dur;
-    }
-
-    const uniqueTotal     = callerPhones.size;
-    const uniqueConnected = connectedCallerPhones.size;
+    const firstTimeCalls  = calls.filter(isFirstTimeCaller);
+    const uniqueTotal     = firstTimeCalls.length;
+    const uniqueConnected = firstTimeCalls.filter(isConnectedCall).length;
     const connectRate     = uniqueTotal > 0 ? ((uniqueConnected / uniqueTotal) * 100).toFixed(1) : '0.0';
-    const avgDurSec       = uniqueTotal > 0 ? Math.round(totalDurationSec / calls.length) : 0;
-    const avgDurMin       = Math.floor(avgDurSec / 60);
-    const avgDurSecRem    = String(avgDurSec % 60).padStart(2, '0');
+
+    let totalDurationSec = 0;
+    for (const call of calls) {
+      totalDurationSec += parseInt(call.duration_in_seconds || call.duration || 0);
+    }
+    const avgDurSec    = calls.length > 0 ? Math.round(totalDurationSec / calls.length) : 0;
+    const avgDurMin    = Math.floor(avgDurSec / 60);
+    const avgDurSecRem = String(avgDurSec % 60).padStart(2, '0');
 
     // Per-campaign breakdown (also deduped per campaign)
     const campaignData = CAMPAIGNS.map(camp => {
@@ -121,29 +108,11 @@ app.all('/api/calls', async (req, res) => {
         return campNumberSet.has(tracked);
       });
 
-      const campCallers = new Set();
-      const campConnectedCallers = new Set();
-      for (const call of campCalls) {
-        const callerRaw = (
-          call.caller_number ||
-          call.caller_phone  ||
-          call.caller_id     ||
-          call.from_number   ||
-          call.ani           ||
-          ''
-        ).replace(/\D/g, '');
-        const isConn = call.answered === true ||
-                       call.answered === 'true' ||
-                       call.connected === true  ||
-                       call.status === 'answered';
-        if (callerRaw) campCallers.add(callerRaw);
-        if (isConn && callerRaw) campConnectedCallers.add(callerRaw);
-      }
-
+      const campFirstTime = campCalls.filter(isFirstTimeCaller);
       return {
         campaign:       camp.campaign,
-        totalCalls:     campCallers.size,
-        connectedCalls: campConnectedCallers.size,
+        totalCalls:     campFirstTime.length,
+        connectedCalls: campFirstTime.filter(isConnectedCall).length,
       };
     });
 
