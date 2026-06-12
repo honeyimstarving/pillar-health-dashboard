@@ -67,7 +67,9 @@ async function fetchCTMCalls(dateFrom, dateTo) {
 // ── /api/calls endpoint ──────────────────────────────
 app.all('/api/calls', async (req, res) => {
   try {
-    const { start, end } = { ...req.query, ...req.body };
+    const body = { ...req.query, ...req.body };
+    const start = body.start || body.dateFrom;
+    const end   = body.end   || body.dateTo;
     if (!start || !end) return res.status(400).json({ error: 'start and end required' });
 
     const calls = await fetchCTMCalls(start, end);
