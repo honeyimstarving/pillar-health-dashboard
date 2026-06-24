@@ -131,6 +131,35 @@ app.all('/api/calls', async (req, res) => {
   }
 });
 
+// ── /api/add-deal — append a row to the Manual Deals sheet ──
+app.post('/api/add-deal', async (req, res) => {
+  try {
+    const SHEETS_API_KEY   = process.env.SHEETS_API_KEY;
+    const MANUAL_SHEET_ID  = process.env.MANUAL_DEALS_SHEET_ID;
+    if (!SHEETS_API_KEY || !MANUAL_SHEET_ID) {
+      return res.status(500).json({ error: 'SHEETS_API_KEY or MANUAL_DEALS_SHEET_ID env var missing' });
+    }
+    const { date, agent, source, premium, phone } = req.body;
+    if (!date || !premium) return res.status(400).json({ error: 'date and premium are required' });
+
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${MANUAL_SHEET_ID}/values/Sheet1!A:E:append?valueInputOption=USER_ENTERED&key=${SHEETS_API_KEY}`;
+    const payload = { values: [[date, agent || '', source || '', premium, phone || '']] };
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e?.error?.message || `Sheets API ${r.status}`);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('add-deal error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Health check ─────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
