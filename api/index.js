@@ -1,9 +1,14 @@
 const express = require('express');
 const fetch   = require('node-fetch');
+const https   = require('https');
 const cors    = require('cors');
 const app     = express();
 app.use(cors());
 app.use(express.json());
+
+// Disable connection pooling/keep-alive for CTM calls — avoids "Premature close"
+// errors caused by reusing a socket the server has already closed on its end.
+const noKeepAliveAgent = new https.Agent({ keepAlive: false });
 
 // ── CTM CREDENTIALS (Railway env vars) ──────────────
 const CTM_ACCESS_KEY = process.env.CTM_ACCESS_KEY;
@@ -53,7 +58,8 @@ async function fetchCTMCalls(dateFrom, dateTo) {
 
     const url = `https://app.calltrackingmetrics.com/api/v1/accounts/${CTM_ACCOUNT_ID}/calls?${params}`;
     const res = await fetchWithRetry(url, {
-      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json', 'Connection': 'close' },
+      agent: noKeepAliveAgent,
     });
 
     if (!res.ok) {
