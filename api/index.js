@@ -161,6 +161,37 @@ app.post('/api/add-deal', async (req, res) => {
   }
 });
 
+// ── /api/update-cell — update a single cell in a Google Sheet ──
+app.post('/api/update-cell', async (req, res) => {
+  try {
+    const SHEETS_API_KEY = process.env.SHEETS_API_KEY;
+    if (!SHEETS_API_KEY) {
+      return res.status(500).json({ error: 'SHEETS_API_KEY env var missing' });
+    }
+    const { sheetId, tab, column, row, value } = req.body;
+    if (!sheetId || !tab || !column || !row || value === undefined) {
+      return res.status(400).json({ error: 'sheetId, tab, column, row, and value are required' });
+    }
+
+    const range = `${tab}!${column}${row}`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED&key=${SHEETS_API_KEY}`;
+    const payload = { values: [[value]] };
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e?.error?.message || `Sheets API ${r.status}`);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('update-cell error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Health check ─────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
