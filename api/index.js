@@ -19,6 +19,19 @@ const CAMPAIGNS = [
 
 const ALL_NUMBERS = CAMPAIGNS.flatMap(c => c.numbers);
 
+// ── Fetch with retry (handles transient network blips like "Premature close") ──
+async function fetchWithRetry(url, options, retries = 3, delayMs = 500) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      const transient = /premature close|socket hang up|ECONNRESET|ETIMEDOUT/i.test(err.message || '');
+      if (!transient || attempt === retries) throw err;
+      await new Promise(r => setTimeout(r, delayMs * attempt));
+    }
+  }
+}
+
 // ── CTM call log fetch ───────────────────────────────
 async function fetchCTMCalls(dateFrom, dateTo) {
   if (!CTM_ACCESS_KEY || !CTM_SECRET_KEY || !CTM_ACCOUNT_ID) {
@@ -39,7 +52,7 @@ async function fetchCTMCalls(dateFrom, dateTo) {
     });
 
     const url = `https://app.calltrackingmetrics.com/api/v1/accounts/${CTM_ACCOUNT_ID}/calls?${params}`;
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
     });
 
