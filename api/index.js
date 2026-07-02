@@ -139,6 +139,7 @@ app.all('/api/calls', async (req, res) => {
       // have no Google Ads spend — cost is derived from call volume instead.
       if (camp.costPerCall) {
         result.spend = +(campFirstTime.length * camp.costPerCall).toFixed(2);
+        result.costPerCall = camp.costPerCall;
       }
       return result;
     });
