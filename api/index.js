@@ -18,7 +18,7 @@ const CTM_ACCOUNT_ID = process.env.CTM_ACCOUNT_ID; // 597239
 // ── CAMPAIGN CONFIG ──────────────────────────────────
 const CAMPAIGNS = [
   { campaign: 'CaPillar Cobra',    numbers: ['+18777136513', '+18889835332'] },
-  { campaign: 'Pillar x Ruby',     numbers: ['+14245491282'], costPerCall: 40 },
+  { campaign: 'Pillar x AA Ruby',     numbers: ['+14245491282'], costPerCall: 40 },
   { campaign: 'Gen Health PMAX',   numbers: ['+18777028985', '+18887992605'] },
 ];
 
@@ -135,7 +135,7 @@ app.all('/api/calls', async (req, res) => {
         totalCalls:     campFirstTime.length,
         connectedCalls: campFirstTime.filter(isConnectedCall).length,
       };
-      // Flat-rate campaigns (e.g. Pillar x Ruby: $40 per first-time caller)
+      // Flat-rate campaigns (e.g. Pillar x AA Ruby: $40 per first-time caller)
       // have no Google Ads spend — cost is derived from call volume instead.
       if (camp.costPerCall) {
         result.spend = +(campFirstTime.length * camp.costPerCall).toFixed(2);
