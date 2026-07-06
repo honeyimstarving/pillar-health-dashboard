@@ -188,33 +188,6 @@ app.post('/api/add-deal', async (req, res) => {
   }
 });
 
-// ── TEMPORARY DEBUG ENDPOINT — remove once Emerald matching is confirmed fixed ──
-// Visit e.g. /api/debug-calls?start=2026-07-06&end=2026-07-06 in a browser to see
-// the raw tracking number fields CTM is actually returning for each call.
-app.get('/api/debug-calls', async (req, res) => {
-  try {
-    const { start, end } = req.query;
-    if (!start || !end) return res.status(400).json({ error: 'start and end query params required' });
-    const calls = await fetchCTMCalls(start, end);
-    const knownSet = new Set(ALL_NUMBERS.map(n => n.replace(/\D/g, '')));
-    const raw = calls.map(call => {
-      const trackingNum   = call.tracking_number || '';
-      const trackingPhone = call.tracking_phone_number || '';
-      const stripped = (trackingNum || trackingPhone).replace(/\D/g, '');
-      return {
-        tracking_number: trackingNum,
-        tracking_phone_number: trackingPhone,
-        stripped_digits: stripped,
-        matches_known_campaign: knownSet.has(stripped),
-        tags: call.tags || call.tag_list || call.labels || null,
-      };
-    });
-    res.json({ count: raw.length, calls: raw });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── Health check ─────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
