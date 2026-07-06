@@ -136,7 +136,7 @@ app.all('/api/calls', async (req, res) => {
         totalCalls:     campFirstTime.length,
         connectedCalls: campFirstTime.filter(isConnectedCall).length,
       };
-      // Flat-rate campaigns (e.g. Pillar x AA Ruby: $40 per first-time caller)
+      // Flat-rate campaigns (e.g. Pillar x AA Ruby: $30 per first-time caller)
       // have no Google Ads spend — cost is derived from call volume instead.
       if (camp.costPerCall) {
         result.spend = +(campFirstTime.length * camp.costPerCall).toFixed(2);
