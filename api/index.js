@@ -18,7 +18,7 @@ const CTM_ACCOUNT_ID = process.env.CTM_ACCOUNT_ID; // 597239
 // ── CAMPAIGN CONFIG ──────────────────────────────────
 const CAMPAIGNS = [
   { campaign: 'CaPillar Cobra',    numbers: ['+18777136513', '+18889835332'] },
-  { campaign: 'Pillar x AA Ruby',     numbers: ['+14245491282'], costPerCall: 30 },
+  { campaign: 'Pillar x AA Ruby',  numbers: ['+14245491282'], costPerCall: 30 },
   { campaign: 'CaPillar Emerald',  numbers: ['+18886399178', '+18778651763'] },
   { campaign: 'Gen Health PMAX',   numbers: ['+18777028985', '+18887992605'] },
 ];
@@ -39,6 +39,9 @@ async function fetchWithRetry(url, options, retries = 3, delayMs = 500) {
 }
 
 // ── CTM call log fetch ───────────────────────────────
+// Sends the date window under several parameter names CTM's calls endpoint is
+// known to accept across versions, so a single wrong key can't silently return a
+// default (recent-only) window and undercount the day.
 async function fetchCTMCalls(dateFrom, dateTo) {
   if (!CTM_ACCESS_KEY || !CTM_SECRET_KEY || !CTM_ACCOUNT_ID) {
     throw new Error('CTM_ACCESS_KEY, CTM_SECRET_KEY, and CTM_ACCOUNT_ID env vars are required');
@@ -53,8 +56,11 @@ async function fetchCTMCalls(dateFrom, dateTo) {
     const params = new URLSearchParams({
       page:       String(page),
       per_page:   String(perPage),
+      // Multiple accepted spellings of the date window:
       start_date: dateFrom,
       end_date:   dateTo,
+      start:      dateFrom,
+      end:        dateTo,
     });
 
     const url = `https://app.calltrackingmetrics.com/api/v1/accounts/${CTM_ACCOUNT_ID}/calls?${params}`;
@@ -81,9 +87,60 @@ async function fetchCTMCalls(dateFrom, dateTo) {
   // Filter to only our tracked numbers
   const targetSet = new Set(ALL_NUMBERS.map(n => n.replace(/\D/g, '')));
   return allCalls.filter(call => {
-    const calledNum = (call.tracking_number || call.tracking_phone_number || '').replace(/\D/g, '');
+    const calledNum = trackedNumberOf(call);
     return targetSet.has(calledNum);
   });
+}
+
+// ── Helpers ──────────────────────────────────────────
+// The tracking number the call came in on (digits only).
+function trackedNumberOf(call) {
+  return String(call.tracking_number || call.tracking_phone_number || call.receiving_number || '').replace(/\D/g, '');
+}
+
+// The caller's own number (digits only) — used to dedup to "globally unique".
+function callerNumberOf(call) {
+  return String(call.caller_number || call.caller_number_e164 || call.caller || call.from_number || call.from || '').replace(/\D/g, '');
+}
+
+// Does CTM's own "first time caller" tag appear on this call?
+function hasFirstTimeTag(call) {
+  const tags = call.tags || call.tag_list || call.labels || '';
+  const tagStr = Array.isArray(tags) ? tags.join('|') : String(tags);
+  return tagStr.toLowerCase().includes('first time caller');
+}
+
+function isConnectedCall(call) {
+  return call.answered === true || call.answered === 'true' ||
+         call.connected === true || call.status === 'answered';
+}
+
+// Count "globally unique" callers within a set of calls: one per distinct caller
+// number. This mirrors CTM's Globally Unique column. Calls with no readable
+// caller number fall back to the tag so they aren't silently dropped.
+function uniqueCallerCount(calls) {
+  const seen = new Set();
+  let taggedNoNumber = 0;
+  for (const call of calls) {
+    const caller = callerNumberOf(call);
+    if (caller) {
+      seen.add(caller);
+    } else if (hasFirstTimeTag(call)) {
+      taggedNoNumber++;
+    }
+  }
+  return seen.size + taggedNoNumber;
+}
+
+// Connected subset, deduped the same way.
+function uniqueConnectedCount(calls) {
+  const seen = new Set();
+  for (const call of calls) {
+    if (!isConnectedCall(call)) continue;
+    const caller = callerNumberOf(call);
+    if (caller) seen.add(caller);
+  }
+  return seen.size;
 }
 
 // ── /api/calls endpoint ──────────────────────────────
@@ -96,22 +153,8 @@ app.all('/api/calls', async (req, res) => {
 
     const calls = await fetchCTMCalls(start, end);
 
-    // ── COUNT BY "first time caller" TAG ──
-    const isFirstTimeCaller = (call) => {
-      const tags = call.tags || call.tag_list || call.labels || '';
-      const tagStr = Array.isArray(tags) ? tags.join('|') : String(tags);
-      return tagStr.toLowerCase().includes('first time caller');
-    };
-
-    const isConnectedCall = (call) =>
-      call.answered === true   ||
-      call.answered === 'true' ||
-      call.connected === true  ||
-      call.status === 'answered';
-
-    const firstTimeCalls  = calls.filter(isFirstTimeCaller);
-    const uniqueTotal     = firstTimeCalls.length;
-    const uniqueConnected = firstTimeCalls.filter(isConnectedCall).length;
+    const uniqueTotal     = uniqueCallerCount(calls);
+    const uniqueConnected = uniqueConnectedCount(calls);
     const connectRate     = uniqueTotal > 0 ? ((uniqueConnected / uniqueTotal) * 100).toFixed(1) : '0.0';
 
     let totalDurationSec = 0;
@@ -122,24 +165,21 @@ app.all('/api/calls', async (req, res) => {
     const avgDurMin    = Math.floor(avgDurSec / 60);
     const avgDurSecRem = String(avgDurSec % 60).padStart(2, '0');
 
-    // Per-campaign breakdown (also deduped per campaign)
+    // Per-campaign breakdown — unique callers per campaign.
     const campaignData = CAMPAIGNS.map(camp => {
       const campNumberSet = new Set(camp.numbers.map(n => n.replace(/\D/g, '')));
-      const campCalls = calls.filter(call => {
-        const tracked = (call.tracking_number || call.tracking_phone_number || '').replace(/\D/g, '');
-        return campNumberSet.has(tracked);
-      });
+      const campCalls = calls.filter(call => campNumberSet.has(trackedNumberOf(call)));
 
-      const campFirstTime = campCalls.filter(isFirstTimeCaller);
+      const campUnique = uniqueCallerCount(campCalls);
       const result = {
         campaign:       camp.campaign,
-        totalCalls:     campFirstTime.length,
-        connectedCalls: campFirstTime.filter(isConnectedCall).length,
+        totalCalls:     campUnique,
+        connectedCalls: uniqueConnectedCount(campCalls),
       };
       // Flat-rate campaigns (e.g. Pillar x AA Ruby: $30 per first-time caller)
-      // have no Google Ads spend — cost is derived from call volume instead.
+      // have no Google Ads spend — cost is derived from unique call volume instead.
       if (camp.costPerCall) {
-        result.spend = +(campFirstTime.length * camp.costPerCall).toFixed(2);
+        result.spend = +(campUnique * camp.costPerCall).toFixed(2);
         result.costPerCall = camp.costPerCall;
       }
       return result;
@@ -150,11 +190,52 @@ app.all('/api/calls', async (req, res) => {
       connectedCalls: uniqueConnected,
       connectRate:    connectRate + '%',
       avgDuration:    `${avgDurMin}:${avgDurSecRem}`,
+      avgDurationSec: avgDurSec,
       campaigns:      campaignData,
     });
 
   } catch (err) {
     console.error('CTM error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── /api/debug-calls — raw visibility into what CTM returns ──
+// Shows the total CTM returned, how many matched our numbers, per-campaign
+// unique/tag/raw counts, and a sample of field names so we can see exactly
+// which fields carry the caller number and tags.
+app.all('/api/debug-calls', async (req, res) => {
+  try {
+    const body = { ...req.query, ...req.body };
+    const start = body.start || body.dateFrom;
+    const end   = body.end   || body.dateTo;
+    if (!start || !end) return res.status(400).json({ error: 'start and end required' });
+
+    const calls = await fetchCTMCalls(start, end);
+
+    const perCampaign = CAMPAIGNS.map(camp => {
+      const campNumberSet = new Set(camp.numbers.map(n => n.replace(/\D/g, '')));
+      const campCalls = calls.filter(call => campNumberSet.has(trackedNumberOf(call)));
+      return {
+        campaign:      camp.campaign,
+        rawCalls:      campCalls.length,
+        uniqueCallers: uniqueCallerCount(campCalls),
+        taggedCalls:   campCalls.filter(hasFirstTimeTag).length,
+        sampleTracked: campCalls.slice(0, 3).map(trackedNumberOf),
+        sampleCallers: campCalls.slice(0, 3).map(callerNumberOf),
+      };
+    });
+
+    const sample = calls[0] || null;
+    res.json({
+      window:        { start, end },
+      totalReturned: calls.length,
+      perCampaign,
+      sampleCallFields: sample ? Object.keys(sample) : [],
+      sampleCall: sample,
+    });
+  } catch (err) {
+    console.error('debug-calls error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
