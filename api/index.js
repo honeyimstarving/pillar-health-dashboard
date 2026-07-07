@@ -78,10 +78,19 @@ async function fetchCTMCalls(dateFrom, dateTo) {
     const calls = data.calls || data.data || [];
     allCalls.push(...calls);
 
-    const total = data.total_count || data.total || 0;
-    if (allCalls.length >= total || calls.length < perPage) break;
+    // Pagination stop conditions — do NOT rely on a total-count field (CTM's
+    // calls-search envelope doesn't reliably include one; treating a missing
+    // count as 0 previously broke the loop after page 1 and truncated the day).
+    // Instead: use CTM's own paging metadata when present, else stop when a page
+    // comes back empty or short.
+    const totalPages = parseInt(data.total_pages || data.page_count || 0);
+    const curPage    = parseInt(data.page || page);
+
+    if (calls.length === 0) break;               // no more results
+    if (totalPages && curPage >= totalPages) break; // reached last page per CTM
+    if (!totalPages && calls.length < perPage) break; // short page = last page
     page++;
-    if (page > 50) break;
+    if (page > 100) break;                        // hard safety cap
   }
 
   // Filter to only our tracked numbers
@@ -90,6 +99,42 @@ async function fetchCTMCalls(dateFrom, dateTo) {
     const calledNum = trackedNumberOf(call);
     return targetSet.has(calledNum);
   });
+}
+
+// ── Debug: trace CTM pagination page-by-page ─────────
+// Returns, for each page fetched, how many calls came back and which top-level
+// metadata keys CTM's envelope carried — so we can see the real paging fields.
+async function traceCTMPaging(dateFrom, dateTo) {
+  const authHeader = 'Basic ' + Buffer.from(`${CTM_ACCESS_KEY}:${CTM_SECRET_KEY}`).toString('base64');
+  const perPage = 100;
+  const pages = [];
+  let envelopeKeys = [];
+  for (let page = 1; page <= 5; page++) {
+    const params = new URLSearchParams({
+      page: String(page), per_page: String(perPage),
+      start_date: dateFrom, end_date: dateTo, start: dateFrom, end: dateTo,
+    });
+    const url = `https://app.calltrackingmetrics.com/api/v1/accounts/${CTM_ACCOUNT_ID}/calls?${params}`;
+    const res = await fetchWithRetry(url, {
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json', 'Connection': 'close' },
+      agent: noKeepAliveAgent,
+    });
+    if (!res.ok) { pages.push({ page, error: res.status }); break; }
+    const data = await res.json();
+    const calls = data.calls || data.data || [];
+    if (page === 1) {
+      envelopeKeys = Object.keys(data).filter(k => k !== 'calls' && k !== 'data');
+    }
+    pages.push({
+      page,
+      returned:    calls.length,
+      total:       data.total ?? data.total_count ?? null,
+      total_pages: data.total_pages ?? data.page_count ?? null,
+      page_field:  data.page ?? null,
+    });
+    if (calls.length === 0) break;
+  }
+  return { envelopeKeys, pages };
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -211,6 +256,7 @@ app.all('/api/debug-calls', async (req, res) => {
     const end   = body.end   || body.dateTo;
     if (!start || !end) return res.status(400).json({ error: 'start and end required' });
 
+    const trace = await traceCTMPaging(start, end);
     const calls = await fetchCTMCalls(start, end);
 
     const perCampaign = CAMPAIGNS.map(camp => {
@@ -230,6 +276,7 @@ app.all('/api/debug-calls', async (req, res) => {
     res.json({
       window:        { start, end },
       totalReturned: calls.length,
+      pagingTrace:   trace,
       perCampaign,
       sampleCallFields: sample ? Object.keys(sample) : [],
       sampleCall: sample,
