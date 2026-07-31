@@ -17,10 +17,10 @@ const CTM_ACCOUNT_ID = process.env.CTM_ACCOUNT_ID; // 597239
 
 // ── CAMPAIGN CONFIG ──────────────────────────────────
 const CAMPAIGNS = [
-  { campaign: 'CaPillar Cobra',    numbers: ['+18777136513', '+18889835332'] },
-  { campaign: 'Pillar x AA Ruby',  numbers: ['+14245491282'], costPerCall: 30 },
-  { campaign: 'CaPillar Emerald',  numbers: ['+18886399178', '+18778651763'] },
-  { campaign: 'Gen Health PMAX',   numbers: ['+18777028985', '+18887992605'] },
+  { campaign: 'CaPillar Cobra',   numbers: ['+18777136513', '+18889835332'] },
+  { campaign: 'CaPillar Emerald', numbers: ['+18886399178', '+18778651763'] },
+  { campaign: 'Life Happens',     numbers: ['+18889645703', '+18885267409', '+18774164461'] },
+  { campaign: 'High Intent',      numbers: ['+18889715717', '+18883874484', '+18773520401'] },
 ];
 
 const ALL_NUMBERS = CAMPAIGNS.flatMap(c => c.numbers);
@@ -216,18 +216,12 @@ app.all('/api/calls', async (req, res) => {
       const campCalls = calls.filter(call => campNumberSet.has(trackedNumberOf(call)));
 
       const campUnique = uniqueCallerCount(campCalls);
-      const result = {
+      // All campaigns now draw spend from Google Ads on the frontend — no flat-rate rates.
+      return {
         campaign:       camp.campaign,
         totalCalls:     campUnique,
         connectedCalls: uniqueConnectedCount(campCalls),
       };
-      // Flat-rate campaigns (e.g. Pillar x AA Ruby: $30 per first-time caller)
-      // have no Google Ads spend — cost is derived from unique call volume instead.
-      if (camp.costPerCall) {
-        result.spend = +(campUnique * camp.costPerCall).toFixed(2);
-        result.costPerCall = camp.costPerCall;
-      }
-      return result;
     });
 
     res.json({
