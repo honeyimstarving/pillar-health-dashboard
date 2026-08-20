@@ -18,8 +18,9 @@ const CTM_ACCOUNT_ID = process.env.CTM_ACCOUNT_ID; // 597239
 // ── CAMPAIGN CONFIG ──────────────────────────────────
 const CAMPAIGNS = [
   { campaign: 'CaPillar Cobra', numbers: ['+18777136513', '+18889835332'] },
+  { campaign: 'CaPillar Emerald', numbers: ['+18778651763', '+18777632129', '+18773314164', '+18886399178'] },
   { campaign: 'Life Happens',   numbers: ['+18889645703', '+18885267409', '+18774164461'] },
-  { campaign: 'Ruby',           numbers: ['+18777028985', '+18887992605', '+18882829413'] },
+  { campaign: 'Ruby',           numbers: ['+18777028985', '+18887992605', '+18886706511', '+18886229281'] },
 ];
 
 const ALL_NUMBERS = CAMPAIGNS.flatMap(c => c.numbers);
