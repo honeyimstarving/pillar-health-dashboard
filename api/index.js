@@ -131,6 +131,8 @@ function voiceState(call) {
 }
 
 function isInboundVoice(call) {
+  // Calls flagged as excluded in CTM shouldn't reach any reporting metric.
+  if (call.excluded === true || call.excluded === 'true') return false;
   return inboundState(call) !== false && voiceState(call) !== false;
 }
 
@@ -142,7 +144,11 @@ function isInboundVoice(call) {
 //              inside the window. THIS OVERCOUNTS (a repeat caller whose first
 //              call predates the window looks new) and is reported as such.
 function firstTimeField(call) {
-  const v = call.first_time_caller ?? call.is_first_time_caller ?? call.first_time ?? null;
+  // CTM's native boolean. `is_new_caller` is the one this account actually
+  // sends; the others are kept as fallbacks across CTM versions. Preferred over
+  // the "First Time Caller" auto-tag because it can't be switched off by an
+  // edit to the account's tag rules.
+  const v = call.is_new_caller ?? call.first_time_caller ?? call.is_first_time_caller ?? call.first_time ?? null;
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'boolean') return v;
   const s = String(v).toLowerCase();
@@ -249,12 +255,20 @@ app.all('/api/calls', async (req, res) => {
       ? ((connected.length / uniqueTotal) * 100).toFixed(1)
       : '0.0';
 
-    // Duration averaged over the SAME set that produces the count.
+    // Duration averaged over the same set that produces the count, EXCLUDING
+    // rows with no usable duration. In-progress/ringing calls come back with
+    // duration:null, which would otherwise average in as zero and understate it.
     let totalDurationSec = 0;
+    let durationSamples  = 0;
     for (const call of firstTime) {
-      totalDurationSec += parseInt(call.duration_in_seconds || call.duration || 0);
+      const raw = call.duration_in_seconds ?? call.duration ?? call.talk_time ?? null;
+      if (raw === null || raw === undefined || raw === '') continue;
+      const secs = parseInt(raw);
+      if (isNaN(secs)) continue;
+      totalDurationSec += secs;
+      durationSamples++;
     }
-    const avgDurSec    = uniqueTotal > 0 ? Math.round(totalDurationSec / uniqueTotal) : 0;
+    const avgDurSec    = durationSamples > 0 ? Math.round(totalDurationSec / durationSamples) : 0;
     const avgDurMin    = Math.floor(avgDurSec / 60);
     const avgDurSecRem = String(avgDurSec % 60).padStart(2, '0');
 
