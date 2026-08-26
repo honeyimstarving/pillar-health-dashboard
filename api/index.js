@@ -354,11 +354,26 @@ app.all('/api/debug-calls', async (req, res) => {
         outbound:          campRaw.filter(c => inboundState(c) === false).length,
         nonVoice:          campRaw.filter(c => voiceState(c) === false).length,
         sampleTracked:     campRaw.slice(0, 3).map(trackedNumberOf),
-        sampleCallers:     campRaw.slice(0, 3).map(callerNumberOf),
+        callersReadable:   campRaw.filter(c => !!callerNumberOf(c)).length,
       };
     });
 
+    // Sample call is for FIELD DISCOVERY ONLY — never echo the raw record.
+    // CTM returns transcripts, summaries, caller names, addresses and geo on
+    // every call; this endpoint is unauthenticated, so only structural /
+    // non-identifying fields are exposed.
+    const SAFE_SAMPLE_FIELDS = [
+      'direction', 'dial_status', 'call_status', 'status', 'excluded',
+      'is_new_caller', 'duration', 'talk_time', 'ring_time',
+      'tracking_number', 'tracking_label', 'source', 'called_at', 'tag_list',
+    ];
     const sample = raw[0] || null;
+    const safeSample = sample
+      ? Object.fromEntries(SAFE_SAMPLE_FIELDS
+          .filter(k => k in sample)
+          .map(k => [k, sample[k]]))
+      : null;
+
     res.json({
       window:      { start, end },
       countMethod: mode,
@@ -367,7 +382,7 @@ app.all('/api/debug-calls', async (req, res) => {
       oldWayForComparison,
       perCampaign,
       sampleCallFields: sample ? Object.keys(sample) : [],
-      sampleCall: sample,
+      sampleCall: safeSample,
     });
   } catch (err) {
     console.error('debug-calls error:', err.message);
